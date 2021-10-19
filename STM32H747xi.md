@@ -247,3 +247,141 @@ FDCAN main features
 ## Messag RAM
 
 ## Rx handling
+
+
+## Reset and Clock Control (RCC)
+
+RCC block manage clock and reset generation for the whole microcontroller, which embeds 2 CPU: M7 and M4, CPU1 and CPU2
+RCC block is located in D3 domain
+
+### Main Features
+
+- Reset block:
+    - Generation of local and system reset
+    - bidirectional pin reset allowing to reset the microcontroller or external devices
+    - HOld boot function
+    - WWDG reset support
+- Clock generation block
+    - generate and dispatch of clocks for the complete device
+    - 3 separate PLLs using integer or fractional ratios
+    - possibility to change PLL fractional ratios on-the-fly
+    - Smart clock gating 
+    - 2 external oscillators:
+        - HSE crystal from 4 to 48 MHz
+        - LSE 32kHz crystals
+    - 4 internal oscillators:
+        - HSI
+        - 48 MHz RC oscillator (HSI48)
+        - CSI
+        - LSI
+    - Buffered clock outputs for external devices
+    - Generation of 2 type of interrupts:
+        - clock security mangaement
+        - general interrupt for other events
+    - Clock generation handling in Stop and Standy mode
+
+## RCC reset block functional description
+Several sources can generate a reset:
+    - an external device via NRST pin
+    - a failure on the supply voltage applied to VDD
+    - a watchdog timeout
+    - a software command
+Reset scope depend on the source that generate the reset. 3 reset categories exist:
+    - power-on/off reset
+    - system reset
+    - local resets
+### Power on/off reset
+- activate when VDD is below a threshold levle
+### System Reset
+- reset from NRST pin 
+- reset from power-on/off 
+- reset from brownout reset
+- reset from independent watchdogs
+- software reset from M4 core: SFT2RESET
+- software reset form M7 core: SFT1RESET
+- reset from window watchdogs
+- reset from low-power mode security reset
+### LOcal resets
+- Domain reset
+    - D1,DD2 domain exit DStandby
+### Reset Source Identification
+- CPU can check reset source by checking reset flags in RCC_C1_RSR and RCC_C2_RSR
+- each CPU can reset the flags of its own register by setting RMVF bit without interfering wit other CPU
+
+## RCC Clock block functional description:
+- HSI, HSE, LSE, LSI, CSI, HSI48
+- 3 PLLs
+- offer 2 clock outputs MCO1 and MCO2
+- SCGU block (System Clock Generation Unit) contain several prescaler
+- PKSU block (Peripheral Kernel clock Selection Unit) provide dynamic switches allowing a large choice of kernel clock distribution to peripheral
+- PKEU (Peripheral Kernel Clock Enable Unit) and SCEU (System Clock Enable Unit) perform peripheral clock gating and bus interface matrix clock gating
+
+- Peripheral Clocks:
+    - bus interface clocks: to access its register (AHB, APB or AXI)
+    - kernel clocks
+- CPU clocks
+- Bus matrix Clock
+
+- External Clock Source (HSE Bypass)
+    - external clock source must be provided to OSC_IN pin
+    - selected by setting HSEBYP and HSEON on RCC_CR
+- External crytal/ceramic resonator
+    - setting HSEBYP bit to 0 and HSEON to 1
+
+- HSERDY of RCC_CR indicate HSE is stable or not
+
+- LSE similar
+
+- HSI oscillator: default clock, high-speed internal RC oscillator : 8, 16, 32 or 64 MHz via HSIDIV
+    - time interval between kernal clock request and clock really available
+    - frequency accuracy
+- CSI oscillator: 4 MHz
+    - Low cost
+    - faster startup
+    - very low-power consumption
+- HSI48 : 48 MHz
+    - aim at providign high precisiono clock to the USB peripheral by means of a special Clock Recovery System (CRS) circuitry
+- LSI: 32kHz for watchdog and Auto-wakeup unit
+
+## Clock Security System (CSS)
+- HSECSSON = 1, cannot directly clear HSECSSON but by reset
+
+## MCO1/MCO2
+
+## PLL
+    - PLL1 provide clocks to CPUs and some peripheral
+    - PLL2 & PLL3 generate kernel clock for peripherals
+    - 2 embedded VCOs
+        - a wide-range VCO(VCOH)
+        - low-frequency VCO(VCOL)
+    - input frequency range:
+        - 1 to 2 MHz when VCOL is used
+        - 2 to 16 MHz when VCOH
+    - interger or fractional mode
+    - 13-bit Sigma-Delta modulator
+    - each PLL offer 3 outputs with post-divider
+    - control via RCC_PLLxDIVR, RCC_PLLxFRACR, RCC_PLLCFGR and RCC_CR
+    - frequency must range from 1 to 16 MHz (DIVMx divider of RCC_PLLCKSELR)
+    - PLLxRGE of RCC_PLLCFGR set according to reference input frequency to guarantee optimal performance
+    - PLL can be enaled by setting PLLxON, PLLxRDY indicate PLL is ready
+
+## Output frequency computation
+- integer mode: SH_REG = 0
+    - FVCO = FREF_BK * DIVN
+
+## Initialization phase
+- initialize PLLs register according to the requied f
+    - set PLLxFRACEN = 0 for interger mode
+    - set PLLxFRACEN = 1 for fractional mode
+- once PLLxON = 1, wait unti PLLxRDY = 1
+- once PLLxRDY = 1 -> ready to use
+- if tune PLLx f on-the-fly
+    - PLLxFRACEN = 0
+    - new value uploaded into PLLxFRACR
+    - PLLxFRACEN = 1
+
+## FDCAN clock_
+- FDCANSEL : hse_ck | pll1_q_ck | pll2_q_ck
+- FDCANEN : enable
+- FDCANLPEN : low power enable
+- fdcan_ker_ck
