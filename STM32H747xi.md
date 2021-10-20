@@ -385,3 +385,89 @@ Reset scope depend on the source that generate the reset. 3 reset categories exi
 - FDCANEN : enable
 - FDCANLPEN : low power enable
 - fdcan_ker_ck
+
+
+## Transceiver Delay compensation
+
+During data phase of CAN FD, only 1 node is transmitting, others are receivers. Length of bus line has no impact. When transmitting via FDCAN_TX protocol controller receive transmitted data from its local CAN transceiver via FDCAN_RX. received data is delayed by CAN transceiver loop delay. in case this delay greatedr than TSEG1, a bit error is detected. Without transceiver delay compensation, bitrate in the data phase of a CAN FD frame is limited by the transceiver loop delay
+
+- CHeck for bit error during data phase of transmitting, delayde transmit data is compared against received data at Secondary Sample Point SSP. If bit error is detected, transmitter will react on this bit error at the next following regular sample point.
+
+## Timestamp generation:
+
+For timestamp generation the FDCAN supplies a 16-bit wraparound counter. a prescaler FDCAN_TSCC.TCP can be configured to clock the counter in multiples of CAN bit times (1..16). The counter is readable via FDCAN_TSCV.TCV. When timecounter wrap around interrupt flag FDCAN_IR.TSW is set.
+
+On start of frame reception/transmission the counter value is captured and stored into the timestamp section of a Rx or Tx FIFO
+
+FDCAN_TSCC.TSS
+
+## Timeout counter:
+
+16-bit timeout counter, use the same prescaler controlled by FDCAN_TSCC.TCP as timestamp counter. Timeout counter is configured via FDCAN_TOCC. the actual counter value can be read from FDCAN_TOCV.TOC
+
+- Interrupt FDCAN_IR.TOO is set
+
+## Acceptance Filter
+
+FDCAN can configure 2 sets of acceptance filters, 1 for standard ID and 1 for Extended ID. These filters can be assigned to Rx Buffer, Rx FIFO 0 or Rx FIFO 1. For acceptance filtering each list of filters is executed from element #0 until the first matching element. Acceptance filtering stop at the first matching element
+
+- each filter element can be configured as
+    - range filter 
+    - filter for 1 or 2 dedicated ID
+    - classic bit mask filter
+- each filter element is configurable for acceptance or rejection filtering
+- each filter element can be enable/disable
+- check sequentially, stop with the first matching filter element
+
+- Global filter configuration (FDCAN_GFC)
+- Standard ID filter configuration (FDCAN_SIDFC)
+- Extended ID filter configuration (FDCAN_XIDFC)
+- Extended ID AND Mask (FDCAN_XIDAM)
+
+- Depend on the config of the filter element (SFEC/EFEC) a match trigger 1 of the following actions:
+    - Store receive frame in FIFO 0 or 1
+    - Store receive frame in Rx buffer
+    - Store receive frame in Rx buffer and generate pulse at filter event pin
+    - Reject received frame
+    - Set high priority message interrupt flag FDCAN_IR.HPM
+    - Set high priority message interrupt flag FDCAN_IR.HPM and store received frame in FIFO 0 or FIFO 1
+
+Acceptance filtering is started after the complete ID has been received. After acceptance filtering completed, if a matching Rx buffer or Rx FIFO has been found, message handler start writing the received message data in portion of 32 bit to the matching Rx buffer or Rx FIFO
+
+## Range Filter
+
+- FIlter match for all received frames with message ID in range defined by SF1ID/SF2ID and EF1ID/EF2ID
+    - EFT = 00: message ID of received frames is AND with the extended ID AND Mask before the range filter is applied
+    - EFT = 11: the extended ID AND Mask is not used for range filtering
+
+## Filter for dedicated IDs
+
+- to filter for 1 specific message ID, the filter element has to be configured with SF1ID = SF2ID and EF1ID = EF2ID
+
+## Classic Bit mask filter
+
+- SF1ID/EF1ID is used as message UD filter while SF2ID/EF2ID is used as filter mask
+- 0 bit at filter mask will mask out the corresponding bit position of the configured ID filter -> not relevant
+- in case a
+
+## TTCAN
+
+### Reference Message
+- level 1 _ data length must be at least 1
+- level 0,2 _ data length must be at least 4
+
+### TTCAN Timing
+- Network Time Unit(NTU) is the unit in which all times are measured
+- initial reference trigger offset FDCAN_TTOC.IRTO 7-bit how long a backup time master wait before transmiss reference mssag 
+- FDCAN_TTOCF.OM operate in TTCAN level 0, 1 or 2.
+
+## Trigger memory
+
+- is part of the external message RAM to which the TTCAN is connected to
+- upto 64 trigger elements
+- a trigger memory element consist of time mark TM, cycle code CC, trigger type TYPE, filter type FTYPE, message number MNR, message status count MSC, time mark event internal TMIN, time mark event external TMEX
+- time mark define at which cycle time a trigger become active
+
+## Trigger Types
+
+- Tx_Ref_Trigger (TYPE = 0000) and 
