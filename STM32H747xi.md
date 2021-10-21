@@ -471,3 +471,94 @@ Acceptance filtering is started after the complete ID has been received. After a
 ## Trigger Types
 
 - Tx_Ref_Trigger (TYPE = 0000) and 
+
+
+
+## Reference Manual
+
+### TX Handler:
+
+- Control msg transfer ffrom message RAM to CAN core. max of 32 Tx Buffers can be configured for trnasmission. Tx buffer can be used as dedicated Tx buffer, Tx FIFO, part of a Tx que or combination. Tx event FIFO store Tx timestamps together with message ID
+- on FDCAN1, Tx handler also implement Frame Synch Entity (FSE) which control time-triggered communication. Synch itself with the reference message on the CAN bus, control cycle time and global time and handle transmissions according to the predefined mssage schedule, the system matrix. also handles time marks of the sstem matrix are linked to the messages in the message RAM. Stop watch trigger, event trigger and time mark interrupt
+
+### Rx Handler:
+
+- control transfer of received msg from CAN core to the external msg RAM. Rx handler support 2 receive FIFOs, upto 64 Rx buffer to stored all msg . A didicated Rx buffer is to store only msg with a specific ID. Rx timestamp is stored together with each msg. 128 filters can be defined for 11-bit IDs and 64 filters for 29-bit ID
+
+### Message RAM interface
+
+### CAN FD operation
+
+- 2 variants in the CAN FD protocol: LFM (Long Frame Mode), FFM (Fast Frame MOdee)
+- FDF bit 0 signify a CAN FD frame, 1 signify a classic CAN frame
+
+### Transceiver delay compensation
+
+- delay > TSEG1
+- to check for bit errors during data phase, delayed transmit data is compared against the received data at the Secondary Sample Point (SSP)
+
+### Application watchdog (FDCAN1 only)
+
+- served by reading register FDCAN_TTOST. TT Application watchdog should not be disabled in TT Application
+
+- Timestamp generation:
+    - prescaler FDCAN_TSCC.TCP
+    - counter FDCAN_TSCV.TCV
+    - TimeStamp store in Rx buffer/Rx FIFO (RXTS[15:0]) or Tx event FIFO (TXTS[15:0])
+
+- Timeout counter:
+    - prescaler FDCAN_TSCC.TCP
+    - Config FDCAN_TOCC
+    - Value FDCAN_TOCV.TOC
+    - operation mode: FDCAN_TOCC.TOS
+        - Continuous mode: counter start when INIT is 0. Write to FDCAN_TOCV preset counter to value FDCAN_TOCC.TOP
+        - if controlled by 1 of FIFO, empty FIFO preset counter to FDCAN_TOCC.TOP. Down counting started when 1st FIFO element is stored. Write to FDCAN_TOCV has no effect
+        - counter reach 0 -> interrupt flag FDCAN_IR.TOO is set
+
+### Message RAM
+
+- width 32 bits
+- can allocate up to 2560 words 
+- address words not single bytes
+- [15:2] is considered
+
+### Rx Handling
+
+control acceptance filtering, transfer of received msg to Tx buffer or to 1 of 2 Rx FIFO, Rx FIFO put and get indices
+
+- Acceptnce filter:
+    - 2 sets
+    - list of filters is executed from #0 until first matching elemnet
+    - Global filter config FDCAN_GFC
+    - Standard IF filter config FDCAN_SIDFC
+    - Extended ID filter config FDCAN_XIDFC
+    - Extended ID AND mask FDCAN_XIDAM
+
+- RxFIFO:
+    - blocking mode
+        - when Rx FIFO full, no further message is written to the Rx FIFO until 1 msg read out 
+        - FDCAN_IR.RFNL (msg discarded) 
+    - overwrite mode
+        - full -> overwrite
+
+### Trigger memory
+- is part of external message RAM to whcih TTCAN is connceted to
+- up to 64 trigger elements
+- a trigger memory element consist of:
+    -  time mark (TM)
+    - cycle code (CC)
+    - trigger type (TYPE)
+    - filter type (FTYPE)
+    - message number (MNR)
+    - message status count (MSC)
+    - time mark event internal (TMIN)
+    - time mark event external (TMEX)
+
+- time mark define at which cycle tmie a trigger become active, sorted by time marks
+- msg number & cycle code ignored for type Tx_Ref_Trigger, Tx_Ref_Trigger_Gap, Watch_Trigger, Watch_Trigger_Gap and End_of_List
+- in case of Transmit trigger, Tx handler start to read msg from message RAM 
+
+
+
+
+
