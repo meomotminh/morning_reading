@@ -545,7 +545,7 @@ control acceptance filtering, transfer of received msg to Tx buffer or to 1 of 2
 - is part of external message RAM to whcih TTCAN is connceted to
 - up to 64 trigger elements
 - a trigger memory element consist of:
-    -  time mark (TM)
+    - time mark (TM)
     - cycle code (CC)
     - trigger type (TYPE)
     - filter type (FTYPE)
@@ -562,3 +562,77 @@ control acceptance filtering, transfer of received msg to Tx buffer or to 1 of 2
 
 
 
+
+
+## Difference vw Rx Buffer and Rx FIFO
+
+- Sections to configure:
+    - Rx buffer: 64 dedicated Rx buffers can be configured
+    - Rx fifo: 2 FIFO can be configured
+- Elements per section:
+    - Rx buffer: configured to contain only 1 element per buffer
+    - Rx fifo: may contain 1 or more elements (up to 64) per section
+- Position in RAM:
+    - Rx buffer: user choose buffer index
+    - Rx fifo: auto and dynamic managed
+- Discard newly arriving element config
+    - Rx buffer: discard new element when buffer is locked
+    - Rx fifo: discard new when fifo full
+
+## Transmission Section
+- Tx Event FIFO 
+    - by using Tx event FIFO, CPU get following info:
+        - in which order the elements were transmitted
+        - local time when frame was transmitted
+    - config via FDCAN_TXEFC
+    - can store up to 32 elements
+    - event is stored only EFC bit in the Tx buffer = 1
+- Tx buffer section
+    - Tx buffer or Tx queue or Tx FIFO
+    - 32 elements supported by FDCAN
+    - each element contain ID, DLC, control bits, data field, bits filed msg marker and event FIFO control bit
+    - Dedicated Tx buffer:
+        - config via FDCAN_TXBC register
+        - each Tx buffer is config with a specific ID to store only 1 element
+        - transmission is requested via "add request"
+- Tx FIFO
+    - FDCAN_TXBC = 0
+    - elements stored in Tx FIFO transmitted starting with element refereced by the "get index" via TFG1[4:0] field in FDCAN_TXFQS
+- Tx Queue
+    - FDCAN_TXBC = 1
+    - transmit starting with the Tx queue buffer with the lowest ID
+
+- Feature
+- Section that can be configed
+    - Tx buffer: 32 dedicated Tx buffer
+    - TX FIFO: 1 Tx FIFO 
+    - Tx queue: 1 Tx Queue
+- Elements per section
+    - Tx buffer: 1 element per buffer
+    - Tx FIFO: 1 or more elements
+    - Tx queue: 1 or more elements
+- Element to be sent first
+    - Tx buffer: lowest ID
+    - Tx FIFO: FIFO order
+    - Tx queue: lowest ID
+- multiple elements with the same ID_
+    - Tx buffer: 1st transmission request
+    - Tx FIFO: no prior in ID
+    - Tx queue: FIFO order
+- position in RAM
+    - Tx buffer: user choose buffer index
+    - Tx FIFO & Tx queue: auto and dynamic managed
+-  pending element:
+    - Tx buffer: elemnt become pending after being added to the RAM and after Tx Buffer request is enable
+    - Tx FIFO and Queue: pending after beign added to RAM (request is auto enabled)
+
+- Mixed config:
+    - Tx buffer + Tx FIFO
+        - number of Tx buffer is config in FDCAN_TXBC
+    - Tx handler scan all dedicated Tx buffer with an actiavted transmission request and oldest pending Tx FIFO buffer . lowest ID -> transmit
+
+- FDCAN Peripheral is configured:
+    - send 32 msg with dedicatd Tx buffer (each msg contain 8 bytes)
+    - have 128 11-bit filter 
+    - receive 64 msg where each msg contain 64 data fields in dedicated Rx buffer ()
+    - receive 64 msg where each msg contain 64 bytes in data field in Rx FIFO0
