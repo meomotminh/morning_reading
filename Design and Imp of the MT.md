@@ -442,4 +442,168 @@ Then read in the INODE of /a-> determine wheter it's a DIR
 
 A command is usually a binary executable file. By default all executable programs are in the /bin directory. If an executable file is not in  /binm it must be entered by a full pathname. Given a command line, such as "cat filename", sh forks a child process to execute the cat command and waits for the child process to terminate. The child process executes the command by changing its execution image to the cat program, passing as parameter filename to the program. When the child process terminate, it wakes up the parent sh process, which prompts for another command
 
-# CHAP 3 BOOTING OPERATING SYSTE
+# CHAP 3 BOOTING OPERATING SYSTEM
+
+## Booting
+short for bootstrap process of loading an operating system image into computer memory and starting up the operating system
+booting system of Intel x86 based 
+BIOS (Basic Input Output System) program stored in ROM 
+after power on, PC's CPU start to execute BIOS -> BIOS perform POST (Power-on Self Test) to check system hardware for proper operation -> searches for a device to boot.
+Bootable devices are maintained in a programmable CMOS memory, order: floppy disk, CDROM, hard disk, etc. 
+If BIOS find a bootable device, it tries to boot from that device, otherwise, it display a "no bootable device found"
+
+## Bootable Devices
+stoarge device supported by BIOS for booting, contains a booter and a bootable system image. During booting, BIOS Loads the first 512 bytes of the booter to the memory location (segment, offset) = (0x0000, 0x7C00) = 0x07C00 and jumps to there to execute the booter-> up to the booter to do the rest.
+
+PC only have 64KB of RAM, memory below 0x7C00 is reserved for interrupt vectors, BIOS and BASIC. The first usable memory begins at 0x08000. When execution starts, the actions of booter are:
+- load the rest of the booter into memory and execute the complete booter
+- find and load the os image into memory
+- send CPU to execute the startup code of the OS kernel, which start up the OS
+
+## Floppy Disk Booting
+booting requires writing a booter to the beginning part of a device, sector 0 of a hard disk, known as the Master Boot Record (MBR). However, writing to a hard disk is risky, a mistake may render the hard disk non-bootable or destroy the disk partition table 
+
+Virtual machines are more convenient. missing or corrupted system files. In these situations, it is very useful to have an alternative way to boot up the machine to repair or rescue the system.
+
+(1) FD contains booter followed by a bootable OS image: a FD is dedicated to booting, it contains a booter in sector 0, followed by a bootable OS image in consecutive sectors
+
+The size of the OS image, number of sectors, is either in the beginning part of the OS image or patched in the booter itself, so the booter can determine how many sectors of the OS image to load. The loading address is knownm.
+
+Booter load the OS image sectors to the specified address and then send the CPU to execute the loaded OS image.
+
+(2) FD with a bootable image and a RAM disk image: to run, most OS kernels require a root file system, baisc file system which contains enough special files, commands and shared libraries, needed by the OS kernel.
+
+Assuming root file system already existed on a separate device, OS kernel can be instructed to mount the appropriate device as the root file system. Boot disk is used to boot up the kernel, which is compiled with RAM disk support. root disk is a compressed RAM disk image of a root file system. When linux kernel start up, it prompts and waits for a root disk to be inserted -> the kernel load the root disk content to a RAM disk area in memory, un-compress the RAM disk image and mounts the RAM disk as the root file system
+
+real mode MTX image size is 128KB -> EXT2 file system 1024-128=896 blocks, populates with files needed by the MTX kernel and place the MTX kernel in the last 128 blocks of the disk. Block 0 is not used by the file system, contain MTX booter
+
+During booting, booter load MTX kernel from the last 128 disk blocks and transfer contro to the MTX kernel
+when MTX kernel start, it mounts the FD as the root file system.
+
+(3) FD is a file system with bootable image files: FD is complete file system containing a bootable OS image as a regular file. OS image can be placed directly under the root directory. During booting, booter first finds the OS image file, then it loads the image'S disk block into memory and sends CPU to execute the loaded OS image
+
+Bootable MTX kernels are files in the /boot directory. Block 0 of the disk contains a MTX booter
+During booting, booter prompt for a MTX kernel to boot
+with a bootable file name, the booter find the image file and load its disk blocks to the segment 0x1000
+when loading complete, it transfer control to the kernel image
+when the MTX kernel start up, it mounts the FD as the root file system and runs on the same FD. how to make comlete LInux file system small enough to fit in a single FD-> BusyBox is about 400KB, yet support all basic command of Unix
+
+(4) FD wutg a viiter fir HD booting: FD based booter for booting from hard disk partitions. During booting, the booter is loaded from FD, once exectuon starts, all actions are for booting system images from hard disk partitions. Since the hard disk is accessed in read-only mode, this avoids any chances of corrupting the hard disk
+
+## Hard Disk Booting
+IDE hard disks but same to SCSI and SATA hard disks
+(1) Hard Disk Partitions: devided into several partitions. each is formatted as a unique file system and contain a different OS. the partitions are defined by a partition table in the first (MBR) sector of the disk. IN the MBR the partition table begin at the byte offset 0x1BE, has 16-byte entries for 4 primary partitions. If needed one of partitions can be EXTEND type
+
+Each partition is assigned a unique number for identification.
+
+(2) Hard Disk Booting Sequence: when booting from a hard disk BIOS loads the MBR booter to the memory location (0x0000, 0x7C00) and executes it as usual
+
+MBR booter may ask for a partition to boot-> load MBR of the partition to (0x0000, 0x7C00) and executes the local MBR booter. It is then up to the local MBR booter to finish the booting task. Such a MBR booter is commonly known as a chain-boot-loader or pass-the-buck booter since all it does is to usher to the next booter and says "u do it"
+
+the Linux bootloader LILO can be installerd in the MBR for booting Linux as well as DOS and Windows
+In general, a MBR booter cannot perform the entire booting task by itself due to its small size and limited capacity but the beginning part of a multi-stage booter: BIOS loads stage 1 and executes it first, then stage 1 loads and execute stage 2... 
+
+## CD/DVD booting
+CDROM is used for data storage with propiertary booting methods provided by different computer vendors. El-Torito bootable CD specification
+(1) the El-Torito CDROM boot protocol: 3 different ways to setup a CDROM for booting
+(2) Emulation booting: boot image must be either floppy disk image or a (single-partition) hard disk image.
+During booting, BIOS loads the first 512 bytes of a booter from the boot image to (0x0000, 0x07C0) and execute the booter as usual. In addition, BIOS also emulates the CD/DVD drive as either a FD or HD. If the booting image size is 1.44 or 2.88 MB, it emulates the CD as the first floppy disk otherwise hard drive.
+Once boot up, the boot image on the CD can be accessed as the emulated drive thorugh BIOS. The envi is identiccal to that of booting up from the emulated drive. If emulated boot image is a FD, after booting up the bootable FD image can be accessed as drive A. if the boot image is hard disk image, after booting the image become drive C
+(3) No-emulation Booting: boot image can be any binary execuatable code. For real-mode OS images, a separate booter is not necessary because the entire OS image can be booted into memory directly.
+
+During booting, booter itself can be loaded directly, but when the booter tries to load the OS image, it needs a device number of the CD drive to make BIOS calles (0x81 for the first IDE slave or 0x82 for the second IDE mster)
+
+WHen BIOS invoke a booter, it also passes the emulated drive number in the CPU'S DL register- the booter must catch the drive number and use it to make BIOS calls. Similar to emulation booting, while it is easy to boot up an OS image from the CD, to access the contents on the CD is another matter. In order to access the contents, a booted up OS must have drivers to interpret the iso9660 file system on the CD
+
+## USB Drive Booting
+USB drives are similar to hard disks, can be divided into partitions. to be bootable, some BIOS require a USB drive to have an active partition. During booting, BIOS emulates the USB drive as the usual C drive (0x80). The env is the smae as that of booting from the first hard disk
+
+If the PC's BIOS suport USB booting, Linux kernel will boot up from the USB partition. When Linux kernel start, it only activates drivers for IDE and SCSI devices but not for USB drives
+
+## Boot Linux with Initial RAM disk Image
+standard way-> allow a single generic Linux kernel to be used on many different Linux config. An initrd is a RAM disk image which serves as a temporary root file system when the Linux kernel first start up. While running on a RAM disk, the Linux kernel executes a sh script, initrc, wihch directs the kernel to load the driver modules of the real root device-> when the real root device is activated and ready, the kernel discard the RAM disk and mount the real root device as the root file system
+
+## Network Booting
+The basic requirement is to establish a network connection to a server machine in a networkm such as a server running the BOOTP Protocol in a TCP/IP network. Once the connection is made, booting code or the entire kernel code can be downloaded from the server to the local machine. After that, the booting sequence is the same as before
+
+## Develop Booter Programs
+A Linux distribution usually comes with a default booter, either LILO or GRUB
+
+### Requirements of Booter Programs
+Before developing booter program, point out the unique requirements:
+1. need assembly code because it must manipulate CPU registers and make BIOS calls
+2. when PC start, it is in the 16-bit real mode, in which the CPU can only execute 16-bit code and access the lowest 1MB memmory. To create a booter, must use a compiler-linker that generates 16-bit code (cannot use GCC because GCC compiler generates 32 or 64 bit code) -> BCC package under Linux
+3. binary executable generated by BCC uses a single-segment memory model, in which the code, data and stack segments are all the same. Such program can be loaded to and executed from any available segment in memory. A segment is a memory area that begins at a 16-byte boundary. During execution, the CPU's CS, DS and SS registers must all point to the same segment of the program
+4. Booters differ from ordinary programs in many aspects. A booter's size (code + static data) is extremely limited 512 or 1024 bytes to fit in 1 or 2 disk sectors.
+
+When running ordinary program, OS will load the entire program into memory and set up the program's execution env before execution start. In contrast, booter only has 512 bytes loaded at 0x07C00. If the booter is larger than 512 bytes, it must load the missing parts in by itself. If the booter's initial memory area is needed by the OS, it must be moved to a different location in order not to clobbered by the incoming OS image. In addition, a booter must manage its own execution env, set up CPU segment registers and establish a stack
+
+5. A booter cannot use the standard library I/O function, such as gets() and printf(). These funtions depend on OS support. The only available support is BIOS. If needed, a booter must implement its own I/O function by calling only BIOS
+
+6. When developing an ordinary program, we may use tools gdb for debugging. In contrast, no tool to debug a booter
+
+## Online and offline Booters
+In offline, the booter is told which OS image to boot. booter first find the OS image and builds a small database for the booter to use. Database may contains the disk blocks or ranges of disk blocks of the OS image
+
+During booting, an offline booter simply uses the pre-built database to load the OS image. LILO is offiline Booter, uses a lilo.conf file to build a map file in the /boot directory and then install the LILO booter to the MBR or the local MBR of the hard disk partition. It uses map file to load the Linux image
+
+The disadvantage is user must install the booter again when the OS image is moved or changed
+
+An online booter (GRUB) can find and load an OS image file directly
+
+### Boot MTX from FD sectors
+Word 0 is a jump instruction, word 1 is the code section size in 16-byte clicks and word 2 is the data section size in bytes
+
+During booting, booter may extract these values to determine the number of sectors of the MTX kernel to load. loading segment address is 0x1000. under linux, use BCC to generate a binary executable without header and dump it to the begginging of a floppy disk
+
+'''
+as86 -o bs.o bs.s   # assemble bs.s into bs.o
+bcc  -c -ansi bc.c  # compile bc.c into bc.o
+
+# link bs.o and bc.o into a binary executable without header
+ld86 -d -o booter bs.o bc.o /usr/lib/bcc/libc.a
+
+# dump booter to sector 0 of a FD
+dd if=booter of=/dev/fd0 bs=512 count=1 conv=notrunc
+'''
+
+where the special file name /dev/fd0 is the first floppy drive. if the target is not a real device but an image file, simply replace /dev/fd0 with the image file name. the parameter conv=notrunc is necessary to prevent dd from truncating the image file.
+
+Building process can be automated by using Makefile or a sh script. For simple compile-link task, a sh script is adequate and actually more convinient
+
+'''
+# usage: mk filename
+as86 -o bs.o bs.s   # bs.s file not change
+bcc -c -ansi $1.c
+ld86 -d -o $1 bs.o $1.o /usr/lib/bcc/libc.a
+dd if=$1 of=IMAGE bs=512 count=1 conv=notrunc
+'''
+
+In assembly, start: is the entry point of the booter program. During booting BIOS loads sector 0 of the boot disk to (0x000,0x7C00) and jumps to there to execute the booter
+
+assume booter must be relocated to a different memory area. instead of moving the booter, the code call BIOS int13 to load the first 2 sectors of the boot disk to the segment 0x9800. The FD drive hardware can load a complete track of 18 sectors at a time. After loading the booter to the new segment, it does a far jump, jmpi next, 0x9800, which sets CPU's (CS, IP)=(0x9800, next), causing the CPU to continue execution from the offset next in the segment 0x9800
+
+choice of 0x9800 is based on simple principle, the booter should be relocated to a higher memory area with enough space to run, leaving as much space as possible in the low memory area for loading the OS image.
+
+The segment 0x9800 is 32KB below the ROM area, which begins at the segment 0xA000. Thi sgive the booter a 32KB address space, big enough for a powerful booter. when execution continues, both ES and CS already point to 0x9800. The assembly code set DS and SS to 0x9800 also to conform to the one-segment memory model of the program. THen it set the stack pointer to 32KB above SS.
+
+In some PCs, the RAM area above 0x9F000 may be reserved by BIOS for special usage. ON these machines the stack pointer can be set to a lower address, eg. 16KB from SS, as long as the booter still has enough bss and stack space to run. With a stack, the program can start to make calls. It calls main() in C, which implements the actual work of the booter. Then main() return, it sends the CPU to execute the loaded MTX image at (0x1000,0)
+
+the remaining assembly code contains functions for I/O and loading disk sectors. funtion getc() and putc() are simple, readfd(), setes() and inces() deserve explaination. to load an OS image, a booter must be able to load disk sectors into memory. BIOS supports disk I/O functions via int13, which takes parameters in CPU registers:
+
+    DH=head(0-1), DL=drive (0 for FD drive 0)
+    CH=cyl (0-79), CL=sector (1-18)
+    AH=2(READ), AL=number of sectors to read
+    Memory address: (segment, offset)=(ES, BX)
+    return status: carry bit=0 means no error, 1 means error
+
+readfd(cyl, head, sector) calls BIOS int13 to load NSEC sectors into memory, NSEC is a global imported from C. The zero-counted parameters (cyl, head, sector) are computed in C code. Since BIOS counts sectors from 1, the sector value is + 1 to suit BIOS. When loading disk sectors BIOS uses (ES, BX) as real memory address. Since BX = 0, the loading address is (ES,0). Thus, ES must be set, by the setes(segment) functions, to a desired loading segment before calling readfd()
+
+The function code loads the parameters into CPU registers and issues int 0x13. after loading NSEC sectors, it uses inces() to increse ES by NSEC sectors to load the next NSEC vectors,
+
+the error() function is used to trap any error during booting. it print an error msg, followed by reboot.
+
+The use of NSEC as a global rather than as a parameter to readfd() serves:
+- illustrates the cross reference of globals between assembly and C code
+- if a value does not change often, it should not be passed as parameter bc increase code size.
+
