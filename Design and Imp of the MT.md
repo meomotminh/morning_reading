@@ -607,3 +607,99 @@ The use of NSEC as a global rather than as a parameter to readfd() serves:
 - illustrates the cross reference of globals between assembly and C code
 - if a value does not change often, it should not be passed as parameter bc increase code size.
 
+Disk sectors are numbered linearly as 0,1,2 but BIOS int13 only accept disk parameter in (cyl, head, sector) or CHS format-> must convert the starting sector number into CHS format:
+    - cyl = sec/36;
+    - head = (sec%36)/18
+    - sector = (sec%36)%18
+Then write a getsector() function in C, which calls readfd() for loading disk sectors
+
+prints() function is used to print msg strings. It is based on putc() in assembly. As specified, on the boot disk the MTX kernel image begins from sector 1, in which word 1 is the tsize of the MTX Kernel and word 2 is the dsize in bytes.
+
+Before booter enter main(), sector 0 and 1 are loaded at 0x9800
+
+while in main(), program's data segment is 0x9800. Thus, word 1 and 2 of sector 1 are now at the offset address 512+2 and 512+4
+
+C code extracts these values to compute the number of sectors of the MTX kernel to load. It set ES to the segment 0x1000 and load the MTX sectors in a loop, similarly to a "sliding window". Each iteration calls getsector(i) to load NSEC sectors from sector i to the memory segment pinted by ES. After loading NSEC sectors to the current segment, it increase ES by NSEC sectors to load the next NSEC sectors. Since NSEC=1, this amounts to loading the OS image by individual sectors.
+
+## Boot Linux zImage from FD sectors
+Bootable Linux images are generated as follows:
+
+'''
+    cd /usr/src/linux  ! cd to linux source code tree directory
+    make .config       ! create a.config file, which guides make
+    make zImage    ! to generate a small Linux image named zImage
+'''
+
+Make zImage generates a small bootable Linux image, in which the compressed kernel size is less than 512 KB. To generate a small LInux zImage, we must select a minimal set of options and compile most of the device drivers as modules. Otherwise, the kernel image size may exceed 512 KB, which is too big to be loaded into real-mode memory between 0x10000 and 0x90000. A bootable Linux image composed of 3 contiguous parts: BOOT, SETUP, LINUX KERNEL
+- BOOT: booter for booting Linux from FD
+- SETUP: seting up env of the Linux kernel
+- small zImage: number of SETUP sectors, n varies from 4 to 10
+
+'''
+    byte 497    # number of SETUP sectors
+    byte 498    # root dev flags: nonzero=READONLY
+    word 500    # Linux kernel size in (16-byte) clicks
+    word 504    # RAM disk info
+    word 506    # video mode
+    word 508    # root device=(major, minor) numbers
+'''
+
+most of boot parameters can be changed by the rdev utility program
+a zImage is intended to be a bootable FD disk of Linux. Since kernel version 2.6, LInux no longer supports FD booting
+During booting, BIOS Loads the boot sector (BOOT) into memory and executes it. BOOT first relocates itself to the segment 0x9000 and jumps to there to continue execution. 
+
+THen load SETUP to the segment 0x9020, which is 512 bytes above BOOT -> load the Linux kernel to the segment 0x1000
+
+When loading finish, it jumps to 0x90200 to run SETUP, which starts up the Linux kernel.
+
+'''
+    BOOT+SETUP  : 0x90000
+    Linux Kernel: 0x10000
+'''
+
+Linux zImage booter essentially duplicates exactly what the BOOT sector does.
+
+'''
+    dd if=zImage of=/dev/fd0 bs=512 seek=1 conv=notrunc
+'''
+ 
+Then install a Linux booter to sector 0
+
+In the Linux kernel image, the root device is set to 0x0200, for the first FD drive. When Linux boots up, it try to mount (2,0) as the root file system.
+
+Since the boot FD is not a file system, the mount will fail the Linux kernel will display an error msg "Kernel panic: VFS: Unable to mount root fs 02:00" and stop -> may change the root device setting to a device containing a Linux file system
+Another way to provide root file system is to use a RAM disk image. RAM disk parameter is set to 16384+550 which tells the Linux kernel not to prompt for a separate ramdisk but load it from block 550 of the boot disk
+
+## Fast FD Loading Schemes
+above FDD booters load OS images 1 sector at a time. for large OS images like Linux, it would be too slow- A faster loading scheme is more desireable-> when boot a LInux zImage, logically and ideally only 2 loading operations are needed:
+'''
+    setes(0x9000); nsec=setup+1; getsector(1);
+    setes(0x1000); nsec=ksectors; getsector(setup+2);
+'''
+
+Problems:
+- FD drives cannot read across track or cylinder. All floppy drives support reading a full track of 18 sectors at a time. SOme BIOS allows reading a complete FD cylinder of 2 tracks. Assuming 1.44MB FD drives support reading cylinders. when loading from FD the sectors must not cross any cylinder boundary -> Each read operation can load at most a full cylinder of 36 sectors
+- infamous cross 64KB boundary problem which says that when loading FD sectors the real memory address cannot cross any 64KB boundary. DMA controller
+
+Solutions: reading 4 sectors at a time- "cross-country" algorithm: when open space, the runner take full strides to run fast. when obstacle ahead, the runner slow down by taking smaller strides until the obstacle is cleared
+
+### Boot MTX Image from File System
+/boot directory
+BLock 0 contains the booter
+loading segment address is 0x1000. after booting up, the MTX kernel mounts the same boot disk as the root file system
+
+problem is how to find the image file's inode. Assume the file name is /boot/mtx, first read in the 0th group descriptor to find the start block of the inodes table-> read in the root inode, which is number 2 inode in the inode table
+- from the root inode's data blocks, search for the first component of the file name, boiot-> once the entry boot is found, we know its inode number-> use Mailmal algorithm to convert the inode number to the disk block containing the inode and its offset in that block-> read in the inode of boot and repeat the search for the component mtx-> if the search step succeed, should have the image file's inode in memory which contain the size and disk blocks of the image file-> then load the image by loading its disk blocks
+
+must access the file system on the boot disk, mean loading disk blocks into the booter program's neniry area-> add a parameter buf to the assembly function readfd(char *buf) where buf is the address of a 1KB memory area in the booter segment-> it is passed to BIOS in BX as the offset of the loading address in the ES segment
+
+Techniques:
+- if a booter needs string data, it is better to define them as string const (name[0] = "boot"), string const are allocated in the program's data area at compile-time. Only their addresses are ised om tje generated code
+- on a FD the number of blocks is less than 1440. the block number in an inode are u32 long values. if we pass the block number as u32 in getblk() calls, the compiled code would have to push the long blk value as 16-bit item twice-> parameter blk in getblk() is declared as u16 but when calling getblk(), the long blk values are type-case to u16
+- in the search() function we need to compare a name string with the entry names in an EXT2 directory. each entry name has name_len chars without an ending null byte, do it is not a string. in this case strncmp() would not work. To compare the names, we need to extract the entry name's chars to make a string first. Instead we simply replace the byte at name_len with a 0, which change the entry name into a string for comparison. if name_len is a multiple of 4, the byte at name_len is actually the inode number of the next directory entry, which must be preserved. So we first save the byte and then restore it later
+- before changing ES to load the OS image, we read in the image's indirect blocks first while ES still points at the program's segment. When loading indirect blocks we simply dereference the indirect block numbers in the buffer are as *(u32 *).
+
+### Boot LInux zImage from File System
+The content of an image file are stored in 1KB disk blocks. During booting, we prefer to load the image by blocks. As pointed out earlier, starting from segment 0x1000, loading 1KB blocks will not cross any cylinder or 64KB boundary.
+
+In a LInux zIMage, the kernel image follow BOOT+SETUP immediately. If the number of BOOT+SETUP is odd, the kernel image does not begin at a block boundary, which makes loading by blocks difficult
