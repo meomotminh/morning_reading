@@ -703,3 +703,92 @@ Techniques:
 The content of an image file are stored in 1KB disk blocks. During booting, we prefer to load the image by blocks. As pointed out earlier, starting from segment 0x1000, loading 1KB blocks will not cross any cylinder or 64KB boundary.
 
 In a LInux zIMage, the kernel image follow BOOT+SETUP immediately. If the number of BOOT+SETUP is odd, the kernel image does not begin at a block boundary, which makes loading by blocks difficult
+
+### Hard DIsk BOoter
+HD booter consists of 5 files:
+- bs.s 
+- bc.c 
+- io.c
+- bootMtx.c for booting MTX
+- bootLinux.c for booting Linux
+
+if the partition type is MTX(90) or LInux(83) it allows the user to enter a filename to boot. if the user enters only the return key, it boots /boot/mtx or /boot/vmlinuz by default.
+
+it also support an initial RAM disk image. for non-MTX it acts as a chain-booter to boot other OS, such as Windows.
+
+#### I/O and Memory Access Functions
+HD Booter is no longer limited to 512 or 1024 bytes. with larger code size, we implement a set of I/O function to provide better user interface during booting.
+- gets() function which allows user to input bootable image filename and boot parameters
+- printf() function for formatted printing
+
+'''
+#define MAXLEN 128
+char *gets(char s[]) // caller must provide REAL memory s[maxlen]
+{
+    char c, *t = s; int len = 0;
+    while ((c=getc()) != '/r' && len < MAXLEN - 1){
+        *t++ = c; putc(c); len++;
+    }
+    *t = 0; return s;
+}
+
+char *ctable = "0123456789ABCDEF";
+u16 BASE = 10;  // for decimal numbers
+int rpu(u16 x){
+    char c;
+    if (x){
+        c = ctable[x % BASE];
+        rpu(x / BASE);
+        putc(c);
+    }
+}
+
+int printu(u16 x){
+    (x == 0)? putc('0'): rpu(x);
+    putc(' ');
+}
+'''
+
+function rpu(x) recursively generates digits of x%10 in ASCII and prints them on the ruthrn path
+with printu() writing a prind() to print signed short intergers become trivial, setting BASE to 16 to print HEX
+
+```
+int printf(char *fmt, ...) // some C compiler require ...
+{
+    char *cp = fmt; // cp points to the fmt string
+    u16 *ip = (u16 *)&fmt + 1; // ip point to first item
+    u32 *up;        // for accessing long parameter on stack
+    while (*cp) // scan the format string
+    {
+        if (*cp != '%'){
+            putc(*cp);
+            if (*cp == '\n') // for each '\n'
+                putc('\r');     // print  a '\r'
+            cp++; continue;
+        }
+        cp++;   // print item by %FORMAT symbol
+        switch(*cp){
+            case 'c': putc(*ip); break;
+            case 's': prints(*ip); break;
+            case 'u': printu(*ip); break;
+            case 'd': printd(*ip); break;
+            case 'x': printx(*ip); break;
+            case 'l': printl(*(u32 *)ip++); break;
+            case 'X': printX(*(u32 *)ip++); break;
+        }
+        cp++; ip++; // advance pointer
+    }
+}
+```
+
+
+when booting a big Linux bzImagem booter must get the number of SETUP sectors to determine how to load the various pieces of the image-> set the boot parameters in the loaded BOOT and SETUP sectos for the LInux kernel to use
+
+```
+u8 get_byte(u16 segment, u16 offset){
+    u8 byte;
+    u16 ds = getds();   // getds() in assembly returns DS value
+    setds(segment); // set DS to segment
+    
+}
+```
