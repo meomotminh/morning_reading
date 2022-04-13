@@ -308,20 +308,378 @@ function types can decay into function pointers and everything discussed applied
 
 
 
+# Item 2: Understand auto type deduction
+
+template type deduction involves templates and functions and parameter, auto deals with none of those things
+
+when a var is declared using auto, auto plays the role of T in the template and the type specifier for the variable acts as ParamType
+
+```
+    auto x = 27;
+
+    const auto cx = x;
+
+    const auto& rx = x;
+```
+
+To deduce types for x, cx and rx, compilers act as if there were a template for each declaration as well as a call to that template with the corresponding initializing expression:
+
+```
+    template<typename T>
+    void func_for_x(T param);   // conceptual template for deducing x's type
+
+    func_for_x(27); // param type is x's type
+
+    template<typename T>
+    void func_for_cx(const T param);    // conceptual template for deducing cx's type
+
+    func_for_cx(x); // param type is cx's type
+
+    template<typename T>
+    void func_for_rx(const T& param);   // conceptual template for deducing rx's type
+
+    func_for_rx(x); // param'S deduced type is rx's type
+
+```
+
+- Case 1: The type specifier is a pointer or ref, but not a universal reference
+- Case 2: The type specifier is a universal ref
+- Case 3: The type specifier if neither a pointer nor a ref
+
+```
+    auto x = 27; // case 3
+
+    const auto cx = x;  // case 3
+
+    const auto& rx = x; // case 1
+
+    auto&&  uref1 = x;  // x is int and lvalue, so uref1 type is int&
+
+    auto&& uref2 = cx;  // cx is const int and lvalue, so uref2 type is constint&
+
+    auto&& uref3 = 27;  // 27 is int and rvalue, so uref3 type is int&&
+
+    const char name[] = "R. N. Briggs"; // name type is const char[13]
+
+    auto arr1 = name;   // arr1 type is const char*
+
+    auto& arr2 = name;  // arr2 type is const char(&)[13]
+
+    void someFunc(int, double); // someFunc is a function, type is void(int, double)
+
+    auto func1 = someFunc;  // func1 type is void (*)(int, double)
+
+    auto& func2 = someFunc; // func2 type is void (&)(int, double)
+```
+
+Exception if you want to declare an int with an initial value of 27, C++98 gives u 2 syntactic choices:
+
+```
+    int x1 = 27;
+    int x2(27);
+
+    // C++11 support uniform initialization
+    int x3 = {27};
+    int x4{27};
+```
+
+advantage to declare var using auto instead of fixed types, so it's be nice to replace int with auto 
+
+``` 
+    auto x1 = 27;
+    auto x2(27);
+    auto x3 = {27};
+    auto x4{27};
+```
+
+the first 2 statement declare a var of type int with value 27, the second 2 however declare a var of type std::initializer_list<int> containging a single element with value 27
+
+This is due to a special type deduction rule for auto. when the initializer for an auto-declared var is enclosed in braces, the deduced type is a std::initializer_list. If such a type can't be deduced, the code whill be rejected
 
 
+```
+    auto x5 = {1,2,3.0}; // error
+```
+
+2 kinds of type deduction takiong place:
+- 1: stems from the use of auto: x5's type has to be deduced. because x5 initilaizer is in braces, x5 must be deduced to be a std::initializer_list but std::initializer_list is a template. Instantiations are std::initializer_list<T> for some type T-> mean T's must also be deduced
+- 2: template type deduction
+
+The treatment of braced initializers is the only way in which auto type deduction and template type deduction differ. wwhen auto declared var is initialized with a braced initializer, the deduced type is an instantiation of std::initializer_list but if the corresponding template is passed the same initializer, type deduction fails
+
+```
+    auto x = {11, 23, 9};   // x type is std::initializer_list<int>
+
+    template<typename T>    
+    void f(T param);    // template with parameter declaration equivalent to x
+
+    f({11, 23, 9});     // error can't deduce type for T
+```
+
+if specify in the template that param is a std::initializer_list<T> for some unknown T, template type deduction will deduce
+
+```
+    template<typename T>
+    void f(std::initializer_list<T> initList);
+
+    f({11, 23, 9}); // T deduced as int, and initLIst's type is std::initializer_list<int>
+```
+
+The only real difference bw auto and template type deduction is that auto assumes that a braced initializer represnet a std::initializer_list but template type deduction doesn't
+
+C++14 permits auto to indicate that a funtion's return type should be deduced and C++14 lambda may use auto in parameter declaration. however, these uses of auto employ template type deduction, not auto type deduction. SO a function with an auto return type that return a braced initializer won't compile
+
+```
+    auto createInitList(){
+        return {1,2,3}; // error: can't deduce type for {1,2,3}
+    }
+
+    std::vector<int> v;
+    ...
+
+    auto resetV = [&v](const auto& newValue){v = newValue;};
+
+    resetV({1,2,3});    // error, can't deduce type for {1,2,3}
+```
+
+- auto type deduction is usually the same as template type deduction, but auto type deduction assumes that a braced initilaizer represent a std::initializer_list and template type deduction doesn't
+- auto in a function return type or a lambda parameter implies template type deduction, not auto type deduction
+
+## Item 3; Understand decltype
+
+decltype tell u the name's or the expression type
+
+```
+    const int i = 0;    // decltype(i) is const int
+
+    bool f(const Widget& w);    // decltype(w) is const Widget&
+                                // decltype(f) is bool(const Widget&)
+
+    struct Point{
+        int x,y;        // decltype(Point::x) is int
+    }
+
+    Widget w;           // delctype(w) is Widget
+
+    if (f(w))...        // decltype(f(w)) is bool
+
+    template<typename T>    
+    class vector {
+        public:
+            ...
+            T& operator[](std:size_t index);
+            ...
+    };
+
+    vector<int> v;  // decltype(v) is vector<int>
+
+    if (v[0] == 0)...   // decltype(v[0]) is int&
+```
+
+IN C++11 primary use of decltype is declaring function templates where the function's return type depends on its parameter types-> suppose weite a function takes container that supports indexing via square brackets and index, then authenticate user brfore returing result of the indexing operation. Ther return type of the function should be the same as the type returned by the indexing operation
+
+operator[] on a container of obj of type T typically returns a T&. std::deque and std::vector
+for std::vector<bool> operator[] does not return a bool& instead returns a brand new obj
+
+decltype makes it easy to express that, use of decltype to compute the return type
+
+```
+    template<typename Container, typename Index>
+    auto authAndAcces(Container& c, Index i)
+    -> decltype(c[i])
+    {
+        authenticateUser();
+        return c[i];
+    }
+```
+
+the use of auto before the function name has nothing to do with type deduction. Rather it indicates that C++11's trailing return type syntax is being used that the function's return type will be declared folloing the paramter list. A trailing return type has the advantage that the function's parameters can be used in the specification of the return type. IN authAndAccess, we specify the return type using c and i. if we were to have the return type precede the function name in the conventional fashion, c and i would be unavailable.
+
+with this declaration, authAndAccess return whatever type operator[] returns when applied to the passed-in container
+
+C++11 permit return type for single-statement lambdas to be deduced, C++14 extends this to both all lambdas and all function, including those with multiple statements
+
+```
+    template<typename Container, typename INdex>    // C++14
+    auto authAndAccess(Container& c, Index i)
+    {
+        authenticateUser();
+        return c[i];    // return type deduced from c[i]
+    }
+```
+
+for function with an auto return type spedicification, compiler employ template type deduction. operator[] for most container of T return a T&, but during template type deduction, the ref of an initializing is ignored
+
+```
+    std::deque<int> d;
+    ...
+    authAndAccess(d, 5) = 10;   // authenticate user, return d[5] then assign 10 to it, won't compile
+```
+
+d[5] return an int&, but auto return type deduction for authAndAccess will strip off the ref thus yielding a reutrn type of int, is an rvalue
+
+To get authAndAccess work, we need to use decltype type deduction for its return type, to specify that authAndAccess should return exactly the same type that the expression c[i] return.
+
+```
+    template<typename Container, typename Index>    // C++14
+    decltype(auto)
+    authAndAccess(Container& c, Index i){
+        authenticateUser();
+        return c[i];
+    }
+```
+
+The use of decltype(auto) is not limited to function return types, it can also be convenient for declaring var when u want to apply the decltype type deduction rules to the initializing expression:
+
+```
+    Widget w;
+
+    const Widget& cw = w;
+
+    auto myWidget1 = cw;        // auto type deduction, myWidget1 type is Widget
+
+    decltype(auto) myWidget2 = cw;  // decltype type deduction, myWidget2 type is const Widget&
 
 
+    template<typename Container, typename Index>
+    decltype(auto) authAndAccess(Container& c, Index i);
+```
+
+container is passed by lvalue-ref-to-non-const, because returning a ref to an element of the container permits clients to modify that container. but means it's not possible to pass rvalue continer to this function. Rvalues can't bind to lvalue ref (unless they aer lvalue-ref-to-const)
+
+passing an rvalue container to authAndAccess is an edge case. An rvalue container, being a temporary obj, would typically be destroyed at the end of the statement containing the call to authAdnAccess, that meas that a ref to an element in that container would dangle at the end of the statement that created it.
+
+```
+    std::deque<std::string> makeStringDeque();  // factory function
+
+    // make copy of 5th element of deque returned from makeStringDeque
+    auto s = authAndAccess(makeStringDeque(),5);
+```
+
+Overloading would work (one overload would declare an lvalue ref parameter, the other an rvalue ref parameter), but the we'd have 2 functions to maintain. A way to avoid that is to have authAndAccess employ a ref parameter that can bind to lvalues and rvalues
+
+```
+    template<typename Container, typename Index> // c is now a universal ref
+    decltype(auto) authAndAccess(Container&& c, Index i);
+```
+
+In this template, we don't know what type of continer we're operating on, and means we're equally ignorant of the type of index objects it uses. Employing pass-by-value for obj of an unknown type risks the performance hit of unnecessary copying, the behavioral problems of object slicing and the sting of derision. But in the case of container indices, following the example of the Standard LIbrary for index value (std::string, stdd:vector, std::deque) seems reasonable, so stick with pass-by-value
+
+apply std::forward to universal ref:
+
+```
+    template<typename Container, typename Index>    // C++14
+    decltype(auto)
+    authAndAccess(Container&& c, Index i){
+        authenticateUser();
+        return std::forward<Container>(c)[i]
+    }    
+
+    template<typename Container, typename Index>    // C++11
+    auto
+    authAndAccess(Container&& c, Index i)
+    -> decltype(std::forward<Container>(c)[i])
+    {
+        authenticateUser();
+        return std::forward<Container>(c)[i]
+    }
+```
 
 
+decltype almost always produces the type u expect, rarely surprise. To fully understnad decltype's behavior, u will have to familiarize urself with a few special cases. Applying decltype to a name yields the declared type for that name. Names are lvalue expression, but doesn't affect decltype's behavior. For lvalue expressions more complicated than names, decltype ensures that the type reported is always an lvalue ref. if an lvalue expression other than a name has type T, decltype reports that type as T&. 
+
+int x = 0;
+
+x is name of var, so decltype(x) is int. But wrapping the name x in parenthese yields an expression more complicated than a name. x is an lvalue, and C++ defines the expression(x) to be an lvalue too. decltype((x)) is therefore int&
 
 
+``` 
+    decltype(auto) f1()
+    {
+        int x = 0;
+
+        return x;   // decltype(x) is int, so f1 return int
+    }
+
+    decltype(auto) f2()
+    {
+        int x = 0;
+
+        return (x); // decltype((x)) is int&, so f2 return int&
+    }
+```
+
+not only does f2 have a different return type from f1, it's also returning a ref to a local var-> undefined behavior.
 
 
+- decltype almost always yield the type of a var or expression without any modifications
+- for lvalue expressions of type T other than name, decltype always reports a type of T&
+- C++14 support decltype(auto) like auto deduces a type from its initializer, but it performs the type deduction using the decltype rule
 
 
+# Item 4: Know how to view deduced types
+
+- IDE Editors
+    C++ compiler running inside the IDE
+
+- Compiler Diagnosis
+    cause compilation problem
+
+```
+    template<typename T>    // declaration only
+    class TD;               // Type Displayer
+
+    TD<decltype(x)> xType;
+    TD<decltype(x)> yType;
+```
+
+- Runtime Output
+```
+    std::cout << typeid(x).name() << '\n';
+    std::cout << typeid(y).name() << '\n';
+```
+
+invoking typeid on an obj such as x and y wields a std::type_info obj, and std::type_info has a member function name that produces a C-stype string representation of the name of the type
+
+```
+    template<typename T>
+    void f(const T& param);
+
+    std::vector<Widget> createVec();    // factory function
+
+    const auto vw = createVec();    // init vw w factory return
+
+    if (!vw.empty()){
+        f(&vw[0]);  // call f
+    }
+```
+
+this code involve a user-defined type Widget, an STL container (std::vector) and an auto variable (vw)
 
 
+Boost TypeIndex isn't part of Standard C++, but neither are IDEs or templates like TD
+
+
+```
+    #include <boost/type_index.hpp>
+
+    template<typename T>
+    void f(const T& param)
+    {
+        using std::cout;
+
+        using boost::typeindex::type_id_with_cvr;
+
+        // show T
+        cout << "T = "
+             << type_id_with_cvr<T>().pretty_name()
+             << '\n'
+
+        // show param type
+        cout << "param = "
+             << type_id_with_cvr<decltype(param)>().pretty_name()
+    }
+```
 
 
 
