@@ -789,6 +789,264 @@ u8 get_byte(u16 segment, u16 offset){
     u8 byte;
     u16 ds = getds();   // getds() in assembly returns DS value
     setds(segment); // set DS to segment
-    
+    return byte;
+}
+
+void put_byte(u8 byte, u16 segment, u16 offset){
+    u16 ds = getds();   // save DS
+    setds(segment); // Set DS to segment
+    *(u8 *)offset = byte;   
+    setds(ds);  // restore DS
 }
 ```
+
+#### Read Hard Disk LBA sector
+unlike floppy diskds, which used CHS addressing, large hard disks use LInear Block Addressing (LBA), in which disk sectors are accessed linearly by 32 or 48 bits sector numbers. To read hard disk sectors in LBA, we may use the extended BIOS INT13-42 function. The parameter to INT13-42 are specified in a Disk Address Packet (DAP) structure
+
+```
+    struct dap {
+        u8 len;
+        u8 zero;
+        u16 nsector;
+        u16 addr;
+        u16 segment;
+        u32 sectorLo;   // low 4 bytes of LBA sector
+        u32 sectorHi;   // high 4 bytes of LBA sector
+    }
+```
+
+to call int13-42 we define a global dap structure and initialize it once,as in
+```
+    struct dap dap, *dp = &dap; // dap and dp are globals in C
+    dp->len = 0x10; 
+    dp->zero = 0;
+    dp->sectorHi = 0;   // assume 32 bit LBA, high 4 byte always 0
+```
+
+within a C code, we may set dap's segment, then call getSector() to load one disk sector into the memory location (segment, offset) as in:
+
+```
+    int getSector(u32 sector, u16 offset){
+        dp->nsector = 1;
+        dp->addr = offset;
+        dp->sectorLo = sector;
+        diskr();
+    }
+
+    int getblk(u32 blk, u16 offset, u16 nblk){
+        dp->nsectors = nblk*SECTORS_PER_BLOCK;  // max value = 127
+        dp->addr     = offset;
+        dp->sectorLo = blk*SECTORS_PER_BLOCK;
+        diskr();
+    }
+
+
+<!-- ------------------------------ assembly ------------------------------- -->
+    .globl _diskr, _dap ! _dap is a global dap struct in C
+_diskr:
+    mov dx, #0x0080     ! device = first hard drive
+    mov ax, #0x4200     ! aH = 0x42
+    mov di, #_dap       ! (ES, SI) points to _dap
+    int 0x13            ! call BIOS int13-42 to read sectors
+    jb  _error          ! to error() if carryBiet is set (read failed)
+    ret
+
+```
+
+#### Boot Linux bzImage with Initial Ramdisk Image
+when booting a Linux bzImage, the image's BOOT + SETUP are loaded to 0x9000 as before but the Linex kernel is loaded to the physical address 0x100000 (1 MB) in high memory. If a RAM disk image is specified, it is also loaded to high memory. Since the PC is in 16-bit real mode during booting, it cannot access memory above 1MB directly. Although we may swith cthe PC to protected mode, access high memory and then switch back to real-mode afterwards; doing these requires a lot of work. A better way is to use BIPS INT15-87 which is designed to copy memory between real and protected modes.
+
+```
+    struct GDT{ // Global Descriptor Table
+        u32 zeros[4];   // 16 bytes 0's for BIOS to use
+        // src address
+        u16 src_seg_limit;  // 0xFFFF = 64KB
+        u32 src_addr;       // low 3 bytes of src addr, high_byte= 0x93
+        u16 src_hiword;     // 0x93 and high byte of 32 bit src addr
+
+        // dest address
+        u16 dest_seg_limit; // 0xFFFF = 64KB
+        u32 dest_addr;      // low 3 bytes of dest addr, high byte = 0x93
+        u16 dest_hiword;    // 0x93 and high byte of 32-bit dest addr
+        
+        // BIOS CS DS
+        u32 bzeros[4];
+    };
+```
+
+The GDT specifies a src addr and a dest addr, both are 32-bit physical addr. However bytes form these addr are not adjacent. Only low 3 bytes are part of the addr, the high byte is the access rights 0x93. Similarly, both src_hiword and dest_hiword are defined as u16 but only the high byte is the 4th address byte. The low byte is again the access rights 0x93
+
+E.g: src adddr: 0x00010000 (64KB) -> dest addr: 0x01000000 (16MB)
+
+```
+    init_gdt(struct GDT *p){
+        int i;
+        for (i = 0; i<4; i++){
+            p->zeros[i] = p->bzeros[i] = 0;
+        }
+        p->src_seg_limit = p->dest_seg_limit = 0xFFFF;  // 64KB segment
+        p->src_addr = 0x93010000;   // byte 0x00 00 01 93
+    }
+
+
+    struct GDT gdt; // define a gdt struct
+    init_gdt(&gdt); // initilialize gdt as shown above
+    cp2himem();     // assembly code to cpy
+
+    <!-- ---------------------------- assemby code ----------------------------- -->
+        .globl _cp2himem, _gdt  ! _gdt is a global GDT from C
+    _cp2himem:
+        mov cx, #2048       ! CX=number of 2-byte words to copy
+        mov si, #_gdt       ! (ES, SI) point to GDT struct
+        mov ax, #0x8700     ! aH = 0x87
+        int 0x15            ! call BIOS INT15-87
+        jc  _error
+        ret
+
+```
+
+1. load a disk block (4KB or 8 sectors) to segment 0x1000;
+2. cp2himem();
+3. gdt.vm_addr += 4096;
+4. repeat (1)-(3) for next block
+
+most CPU support loading 16 contiguous blocks at a time. On these machines, the images can be loaded in 64KB chunks
+
+#### Hard Disk Partitions
+
+the partition table of a hard disk is in the MBR sector at the byte offset 446 (0x1BE). 
+
+```
+    struct partition {
+        u8 drive;       // 0x80 active
+        u8 head;        // starting head
+        u8 sector;      // starting sector
+        u8 cylinder;    // starting cylinder
+        u8 sys_type;    // partition type
+        u8 end_head;    // end head
+        u8 end_sector;  // end sector
+        u8 end_cylinder;    
+        u32 start_sector;   // from 0
+        u32 nr_sectors;     // number of sectors in partition
+    }
+
+```
+if a partition is EXTEND type (5), it can be divided into more partitions. Assume partition P4 is EXTEND type and is divided into extend partition P5, P6, P7- The extend partitions form a link list. The first sector of each extend partition is a local MBR. Each local MBR has a partition table, which contain startSector and MBRsector (point to the next local MBR).
+
+All the local MBR's sector numbers are relative to P4's start sector. the link list ends with a 0 in the last local MBR. In a partition table, the CHS values are valid only for disks smaller than 8 GB. For disks larger than 8 GB, but fewer than 5G sector only the last 2 entries startSector and nr_sector are meaningful.
+
+#### Find and Load Linux Kernel and Initrd Image Files
+The need to traverse large EXT2/EXT3 file system on hard disks
+1. in a hard disk partition, the superblock of an EXT2/EXT3 file system is at the byte offset 1024. booter must read it to get values of s_first_data_block. s_log_block_size, s_inodes_per_group and s_inode_size
+2. a large EXT2/EXT3 file system may have many groups. Group descriptors begin at the block (1+s_first_data_block) which is usually 1. Given a group number, we must find its group descriptor and use it to find the group's inode start block
+3. central problem is how to convert an inode number to an inode. apply Mailman algorithm twice
+
+```
+(a) Compute group# and offset# in that group
+    group = (ino - 1) / inodes_per_group
+    inumber = (ino - 1) % inodes_per_group
+(b) Find the group descriptor
+    gdblk = group / desc_per_block; // which blk this GD is in
+    gdisp = group % desc_per_block; // which GD in that block
+(c) Compute inode's block# and offset in that group
+    blk = inumber / inodes_per_block;   // blk# r.e. to group inode_table
+    disp = inumber % inodes_per_block;  // inode offset in that block
+(d) Read group descriptor to get group inode table start block
+    getblk(1 + first_data_block + gdblk, buf, 1); 
+    gp = (GD *)buf + gdisp; // this group desc
+    blk += gp->bg_inode_table;  // blk is r.e to group inode_table
+    getblk(blk, buf, 1);    // read the disk block containing inode
+    INODE *ip = (INODE *)buf + (disp*iratio);   // iratio = 2 if inode_size = 256
+```
+
+when end, INODE *ip should point to the file's inode in memory
+
+4. Load linux Kernel and Ramdisk Image to High Memory. With getblk() and cp2himem(), loading kernel image to 1 MB in high memory is straightforward. when the kernel image does not begin at a block boundary, 
+
+E.g SETUP no is 12-> kernel 5 sectors still in block1, if SETUP no is 23, then BOOT and SETUP are in the first 3 blocks and kernel begin at block#3. it would be better if the LInex kernel of every bzImage begins at a block boundary. Next, loading RAM disk image.An initrd is a small file system, used by Linux kernel as a temporary root file system when the kernel starts up. The initrd contains a minimal set of directoreis and executables such as sh, ismod tool and needed driver modules. while running on initrd, the Linux kernel typically executes a sh script, initrc, to install the needed driver modules and activate the real root device. wehn the real root device is ready, the linux kernel abandons the initrd and mounts a real root file system to complete a 2-stage boot up process. readon of susing initrd is: during booting, linux's startup code only activates a few standard devices such as FD and IDE HS, as possible root devices. Other device drivers are either installed later as modules or not activated at all.AN initrd image can be a tailor-built with instructions to install only the needed driver modules. This allow a single generic LInux kernel to be used in all kinds of linux system config.
+
+a generic LInux kenle only needs the RAM disk driver to start, all other drivers may be installed as modules from the initrd. Assume initrd.img is a RAM disk image file, rename it as inird.gz and run gunzip to uncompress it. then run:
+    mkdir temp; cd temp;    # use a temp DIR
+    cpio -id < ../initrd    # extract initrd cc
+to extract the contents, run: 
+    find .| cpio -o -H newc | gzip > ../in 
+to create a new initrd.gz file
+
+no specific requirement on loading addr of initrd, except for a maximum high addr limit of 0xFE0000000. The hd-booter loads the Linux kernel to 1 MB and initrd to 32 MB. After loading completes, booter must write the loading address and size of the initrd image to SETUP at the byte offsets 24 and 28. Then jumps to execute SETUP at 0x9020. Early SETUP code does not care about the segment register settings. In kernel 2.6, SETUP requires DS = 0x90000 in order to access BOOT as the beginning of its data segment.
+
+#### LInux and MTX Hard Disk Boooter
+
+in BOOTERS/HD/MBR.ext4/ can boot both MTX and LInux with initial RAM disk support, can also boot Windows by chain-booting
+
+#### Boot EXT4 Partitions
+many LInux distributions are switching to EXT4 as the default file system. 
+(1) in EXT4, the i_block[15] array of an inode contains a header and 4 extents strcutures, each 12 byte long
+
+```
+    |<----- u32 i_block[15] area --------->|
+    |header|extent1|extent2|extent3|extent4|
+    struct ext3_extent_header{
+        u16 eh_magic;   // 0xF30A
+        u16 eh_entries; // number of valid entries
+        u16 eh_max;     // capacity of store in entries
+        u16 eh_depth;   // has tree real underlaying blocks
+        u32 eh_generation;  // generation of the tree
+    };
+
+    struct ext3_extent {
+        u32 ee_block;   // first logical block extent covers
+        u16 ee_len;     // number of blocks covered by extent
+        u16 ee_start_hi;    // high 16 bits of physical block
+        u32 ee_start;   // low 32 bits of physical blocks
+    }
+```
+
+(2) GD and INODE types are the same as they are in EXT2, but INODE size is 256 bytes
+(3) bloick in each extent are contiguous. for HD the block size is 4KB
+
+#### Install HD Booter
+beginning part of the booter must be installed in the HD's MBR since that's where the booting process begins. the location chosen must not interfere with the hard disk normal contents. by convention, each HD partition begins at a track boundary. since the MBR is already in track 0, partition 1 begin from track 1. a track has 63 sectors
+
+assume the booter size is less than 31KB, during booting, BIOS loads the MBR to 0x07C00 and executes the beginning part of the hd-booter adn continues execution in the sew segment.
+
+#### CD/DVD ROM Booter
+
+a bootable CD/DVD is created in 2 steps:
+- create an iso9669 file system (standard ECMA-119 1987) containing a CD/DVD booter
+- write the iso image to a CD/DVD by a CD/DVD burning tool
+
+(1) Emulation CDROM booting
+
+- Emulation FD Booting: mkisofs. iso file is a bootable CD image
+
+- Emulation HD Booting: 
+
+- No emulation Linux Booter: iso9660 CDROM contains a sequnece of Volume Descriptors (VDs), which begins at sector 16. each VD has a type identifier, 0 = BOOT, 1 = Primary, 2 = Supplementary and 255 = End of VD table. Unix-style files are under supplementary VD
+
+(2) COmparison with isolinux CDROM Booter
+isolinux is a CD/DVD Linux boot-loader
+
+#### USB Drive Booter
+USB Drive connect to the USB bus:
+- can be divided into partitions.
+- each partition can be formatted as a unique file system and installed with a different OS
+- to make USB drive bootable, install a booter to the USB drive's MBR and coonfig BIOS to boot from the USB drive
+- During booting, BIOS emulates the booting USB drive as C drive
+
+
+# A Simple OS Kernel
+## The Process Concept
+An OS is a multitasking system. in OS , tasks can be called process
+execution image as a memory area containing the execution's code, data and stack. a process is the execution of an image
+in an OS kernel, each process is represented by a unique data strcuture, call the Process Control Block (PCB) or Task Control Block (TCB). OS kernel usually uses a global PROC pointer, running or current, to point at the PROC that is currently executing.
+
+```
+    typedef struct proc{
+        struct proc *next;
+        int         *ksp;
+        int         kstack[1024];
+    } PROC;
+```
+
+## Simple Multitasking Program
+
